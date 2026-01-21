@@ -1,0 +1,74 @@
+version: '3.7'
+services:
+  # --- INFRASTRUCTURE (The Servers) ---
+  
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:latest
+    container_name: redpanda
+    platform: linux/arm64 # Mac M1/M2/M3 specific
+    command:
+      - redpanda start
+      - --smp 1
+      - --memory 1G
+      - --reserve-memory 0M
+      - --overprovisioned
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://redpanda:9092,external://redpanda:19092
+    ports:
+      - 19092:19092
+      - 9092:9092
+    healthcheck: # <--- DevOps Twist: The server tells us if it's ready
+      test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.17.9
+    container_name: elasticsearch
+    platform: linux/amd64
+    environment:
+      - discovery.type=single-node
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ports:
+      - 9200:9200
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cat/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:7.17.9
+    container_name: kibana
+    platform: linux/amd64
+    ports:
+      - 5601:5601
+    depends_on:
+      - elasticsearch
+
+  # --- MICROSERVICES (Your Python Code) ---
+
+  flight-producer:
+    build: .  # Build from the Dockerfile in current folder
+    container_name: producer
+    command: python producer.py
+    restart: always  # <--- THE MAGIC: Auto-Resurrection
+    depends_on:
+      redpanda:
+        condition: service_healthy # Wait until Redpanda is actually ready
+    environment:
+      - PYTHONUNBUFFERED=1 # Force logs to show up instantly
+
+  flight-consumer:
+    build: .
+    container_name: consumer
+    command: python consumer.py
+    restart: always  # <--- THE MAGIC: Auto-Resurrection
+    depends_on:
+      redpanda:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+    environment:
+      - PYTHONUNBUFFERED=1
