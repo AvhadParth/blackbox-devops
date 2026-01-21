@@ -41,4 +41,4 @@ jobs:
         context: .
         push: true
         # REPLACE 'your-docker-username' BELOW WITH YOUR ACTUAL USERNAME!
-        tags: your-docker-username/blackbox-producer:latest
+        tags: avhadparth/blackbox-producer:latest
